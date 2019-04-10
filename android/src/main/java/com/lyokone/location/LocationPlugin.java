@@ -19,6 +19,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.util.Log;
 import android.annotation.TargetApi;
+import android.app.PendingIntent;
 
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.Status;
@@ -38,6 +39,9 @@ import com.google.android.gms.tasks.OnFailureListener;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayDeque;
+import java.util.Arrays;
 
 import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.EventChannel.EventSink;
@@ -59,8 +63,11 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
 
     private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 34;
     private static final int REQUEST_CHECK_SETTINGS = 0x1;
-
     private static final int GPS_ENABLE_REQUEST = 0x1001;
+
+    final static String CALLBACK_DISPATCHER_HANDLE_KEY = "background_location_handler";
+
+    private static ArrayDeque<List<Object>> queue = new ArrayDeque<List<Object>>();
 
     private final FusedLocationProviderClient mFusedLocationClient;
     private final SettingsClient mSettingsClient;
@@ -69,10 +76,12 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     private LocationCallback mLocationCallback;
     private PluginRegistry.RequestPermissionsResultListener mPermissionsResultListener;
 
+    private EventChannel backgroundChannel; 
+
     @TargetApi(Build.VERSION_CODES.N)
     private OnNmeaMessageListener mMessageListener;
 
-    private Double mLastMslAltitude;
+    private static Double mLastMslAltitude;
 
     // Parameters of the request
     private static long update_interval_in_milliseconds = 5000;
@@ -80,6 +89,8 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     private static Integer location_accuray = LocationRequest.PRIORITY_HIGH_ACCURACY;
     private static float distanceFilter = 0f;
 
+
+    private static MethodChannel channel;
     private EventSink events;
     private Result result;
 
@@ -90,11 +101,14 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     private boolean waitingForPermission = false;
     private LocationManager locationManager;
 
+    private Context mContext;
+    private static long mCallbackHandle;
 
     private HashMap<Integer, Integer> mapFlutterAccuracy = new HashMap<>();
 
-    LocationPlugin(Activity activity) {
+    LocationPlugin(Context context, Activity activity) {
         this.activity = activity;
+        this.mContext = context;
         mFusedLocationClient = LocationServices.getFusedLocationProviderClient(activity);
         mSettingsClient = LocationServices.getSettingsClient(activity);
         locationManager = (LocationManager) activity.getSystemService(Context.LOCATION_SERVICE);
@@ -116,14 +130,14 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
      */
     public static void registerWith(Registrar registrar) {
         if(registrar.activity() != null) {
-            final MethodChannel channel = new MethodChannel(registrar.messenger(), METHOD_CHANNEL_NAME);
-            LocationPlugin locationWithMethodChannel = new LocationPlugin(registrar.activity());
+            channel = new MethodChannel(registrar.messenger(), METHOD_CHANNEL_NAME);
+            LocationPlugin locationWithMethodChannel = new LocationPlugin(registrar.context(), registrar.activity());
             channel.setMethodCallHandler(locationWithMethodChannel);
             registrar.addRequestPermissionsResultListener(locationWithMethodChannel.getPermissionsResultListener());
             registrar.addActivityResultListener(locationWithMethodChannel);
 
             final EventChannel eventChannel = new EventChannel(registrar.messenger(), STREAM_CHANNEL_NAME);
-            LocationPlugin locationWithEventChannel = new LocationPlugin(registrar.activity());
+            LocationPlugin locationWithEventChannel = new LocationPlugin(registrar.context(), registrar.activity());
             eventChannel.setStreamHandler(locationWithEventChannel);
             registrar.addRequestPermissionsResultListener(locationWithEventChannel.getPermissionsResultListener());
         }
@@ -180,7 +194,9 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
             checkServiceEnabled(result);
         } else if (call.method.equals("requestService")) {
             requestService(result);
-        } else {
+        } else if (call.method.equals("registerBackgroundLocation")) {
+            registerBackgroundLocation((long) call.argument("rawHandle"), result);
+        }else {
             result.notImplemented();
         }
     }
@@ -475,5 +491,62 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     public void onCancel(Object arguments) {
         mFusedLocationClient.removeLocationUpdates(mLocationCallback);
         events = null;
+    }
+
+    private void registerBackgroundLocation(long callbackHandle, Result result) {
+        try {
+            Log.i("FlutterLocation", "Starting background location updates");
+            LocationRequestHelper.setRequesting(mContext, true);
+            mCallbackHandle = callbackHandle;
+            mFusedLocationClient.requestLocationUpdates(mLocationRequest, getBackgroundPendingIntent());
+            result.success(1);
+        } catch (SecurityException e) {
+            LocationRequestHelper.setRequesting(mContext, false);
+            e.printStackTrace();
+            result.success(0);
+        }
+    }
+
+    private PendingIntent getBackgroundPendingIntent() {
+        Intent intent = new Intent(mContext, BackgroundLocationBroadcastReceiver.class);
+        intent.setAction(BackgroundLocationBroadcastReceiver.ACTION_PROCESS_UPDATES);
+        return PendingIntent.getBroadcast(mContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    public static HashMap<String, Double> locationToHash(Location location) {
+        HashMap<String, Double> loc = new HashMap<>();
+        loc.put("latitude", location.getLatitude());
+        loc.put("longitude", location.getLongitude());
+        loc.put("accuracy", (double) location.getAccuracy());
+
+        // Using NMEA Data to get MSL level altitude
+        if (mLastMslAltitude == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            loc.put("altitude", location.getAltitude());
+        } else {
+            loc.put("altitude", mLastMslAltitude);
+        }
+
+        loc.put("speed", (double) location.getSpeed());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            loc.put("speed_accuracy", (double) location.getSpeedAccuracyMetersPerSecond());
+        }
+        loc.put("heading", (double) location.getBearing());
+        loc.put("time", (double) location.getTime());
+
+        return loc;
+    }
+
+    public static void handleNewBackgroundLocations(Context context, List<Location> locations) {
+        //TODO queue if not ready queue.add(locations);
+
+        List<HashMap<String, Double>> res = new ArrayList<>();
+
+        for (Location location: locations) {
+            res.add(locationToHash(location));
+        }
+        
+        List<Object> result = Arrays.asList(mCallbackHandle, res);
+        Log.i("FlutterLocation", "Trying to send result to host");
+        channel.invokeMethod("", result);
     }
 }

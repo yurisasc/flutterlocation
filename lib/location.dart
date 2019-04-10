@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 
@@ -85,4 +86,25 @@ class Location {
     }
     return _onLocationChanged;
   }
+
+  Future<bool> registerBackgroundLocation(void Function(List<LocationData> id) callback) {
+    // Handler of background task messages
+    _channel.setMethodCallHandler((MethodCall call) async {
+      final List<dynamic> args = call.arguments;
+      final Function callbackHandler = PluginUtilities.getCallbackFromHandle(
+          CallbackHandle.fromRawHandle(args[0]));
+      assert(callback != null);
+      final List<LocationData> locationData = [];
+      for (var location in args[1]) {
+        locationData.add(LocationData.fromMap(location.cast<String, double>()));
+      }
+      callbackHandler(locationData);
+    });
+
+    int rawHandle = PluginUtilities.getCallbackHandle(callback).toRawHandle();
+    return _channel.invokeMethod('registerBackgroundLocation', {
+        "rawHandle": rawHandle,
+      }).then((result) => result == 1);
+  }
+
 }

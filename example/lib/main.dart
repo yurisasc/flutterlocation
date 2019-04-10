@@ -36,6 +36,7 @@ class _MyAppState extends State<MyApp> {
   CameraPosition _currentCameraPosition;
 
   GoogleMap googleMap; 
+  
 
   @override
   void initState() {
@@ -58,6 +59,9 @@ class _MyAppState extends State<MyApp> {
         print("Permission: $_permission");
         if (_permission) {
           location = await _locationService.getLocation();
+
+          bool statusBackgroundLocation = await _locationService.registerBackgroundLocation(callback);
+          print("statusBackgroundLocation: $statusBackgroundLocation");
 
           _locationSubscription = _locationService.onLocationChanged().listen((LocationData result) async {
             _currentCameraPosition = CameraPosition(
@@ -96,6 +100,10 @@ class _MyAppState extends State<MyApp> {
         _startLocation = location;
     });
 
+  }
+
+  static void callback(List<LocationData> locations) async {
+    print('Location data received from background: $locations');
   }
 
   slowRefresh() async {
