@@ -60,7 +60,7 @@ class _MyAppState extends State<MyApp> {
         if (_permission) {
           location = await _locationService.getLocation();
 
-          bool statusBackgroundLocation = await _locationService.registerBackgroundLocation(callback);
+          bool statusBackgroundLocation = await _locationService.registerBackgroundLocation(backgroundCallback);
           print("statusBackgroundLocation: $statusBackgroundLocation");
 
           _locationSubscription = _locationService.onLocationChanged().listen((LocationData result) async {
@@ -102,7 +102,7 @@ class _MyAppState extends State<MyApp> {
 
   }
 
-  static void callback(List<LocationData> locations) async {
+  static void backgroundCallback(List<LocationData> locations) async {
     print('Location data received from background: $locations');
   }
 

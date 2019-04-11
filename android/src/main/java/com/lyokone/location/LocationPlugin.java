@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat;
 import android.util.Log;
 import android.annotation.TargetApi;
 import android.app.PendingIntent;
+import android.content.SharedPreferences;
 
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.Status;
@@ -53,6 +54,10 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.PluginRegistry;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener;
+import io.flutter.view.FlutterCallbackInformation;
+import io.flutter.view.FlutterMain;
+import io.flutter.view.FlutterNativeView;
+import io.flutter.view.FlutterRunArguments;
 
 /**
  * LocationPlugin
@@ -65,7 +70,10 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     private static final int REQUEST_CHECK_SETTINGS = 0x1;
     private static final int GPS_ENABLE_REQUEST = 0x1001;
 
-    final static String CALLBACK_DISPATCHER_HANDLE_KEY = "background_location_handler";
+    private static final String TAG = "FlutterLocation";
+
+    final static String HANDLER_KEY = "background_location_handler";
+    final static String CALLBACK_KEY = "background_location_callback";
 
     private static ArrayDeque<List<Object>> queue = new ArrayDeque<List<Object>>();
 
@@ -91,6 +99,9 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
 
 
     private static MethodChannel channel;
+    private static MethodChannel mBackgroundChannel;
+    private static PluginRegistry.PluginRegistrantCallback mPluginRegistrantCallback;
+
     private EventSink events;
     private Result result;
 
@@ -102,9 +113,10 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
     private LocationManager locationManager;
 
     private Context mContext;
-    private static long mCallbackHandle;
 
     private HashMap<Integer, Integer> mapFlutterAccuracy = new HashMap<>();
+
+    private static FlutterNativeView mFlutterNativeView;
 
     LocationPlugin(Context context, Activity activity) {
         this.activity = activity;
@@ -140,7 +152,13 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
             LocationPlugin locationWithEventChannel = new LocationPlugin(registrar.context(), registrar.activity());
             eventChannel.setStreamHandler(locationWithEventChannel);
             registrar.addRequestPermissionsResultListener(locationWithEventChannel.getPermissionsResultListener());
-        }
+            
+        } 
+    }
+
+    // Called by Application#onCreate
+    public static void setPluginRegistrant(PluginRegistry.PluginRegistrantCallback callback) {
+        HeadlessPlugin.setPluginRegistrant(callback);
     }
 
     @Override
@@ -195,7 +213,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
         } else if (call.method.equals("requestService")) {
             requestService(result);
         } else if (call.method.equals("registerBackgroundLocation")) {
-            registerBackgroundLocation((long) call.argument("rawHandle"), result);
+            registerBackgroundLocation((long) call.argument("rawHandle"), (long) call.argument("rawCallback"), result);
         }else {
             result.notImplemented();
         }
@@ -493,11 +511,18 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
         events = null;
     }
 
-    private void registerBackgroundLocation(long callbackHandle, Result result) {
+    private void registerBackgroundLocation(long handlerRaw, long callbackRaw, Result result) {
         try {
             Log.i("FlutterLocation", "Starting background location updates");
             LocationRequestHelper.setRequesting(mContext, true);
-            mCallbackHandle = callbackHandle;
+
+            SharedPreferences prefs = mContext.getSharedPreferences(this.TAG, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putLong(HANDLER_KEY, handlerRaw);
+            editor.putLong(CALLBACK_KEY, callbackRaw);
+
+            editor.apply();
+
             mFusedLocationClient.requestLocationUpdates(mLocationRequest, getBackgroundPendingIntent());
             result.success(1);
         } catch (SecurityException e) {
@@ -534,19 +559,5 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
         loc.put("time", (double) location.getTime());
 
         return loc;
-    }
-
-    public static void handleNewBackgroundLocations(Context context, List<Location> locations) {
-        //TODO queue if not ready queue.add(locations);
-
-        List<HashMap<String, Double>> res = new ArrayList<>();
-
-        for (Location location: locations) {
-            res.add(locationToHash(location));
-        }
-        
-        List<Object> result = Arrays.asList(mCallbackHandle, res);
-        Log.i("FlutterLocation", "Trying to send result to host");
-        channel.invokeMethod("", result);
     }
 }

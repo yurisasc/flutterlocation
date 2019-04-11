@@ -21,11 +21,12 @@ public class BackgroundLocationBroadcastReceiver extends BroadcastReceiver {
         if (intent != null) {
             final String action = intent.getAction();
             if (ACTION_PROCESS_UPDATES.equals(action)) {
-                // long callbackHandle = intent.getLongExtra(LocationPlugin.CALLBACK_DISPATCHER_HANDLE_KEY, 0L);
+                // long handlerRaw = intent.getLongExtra(LocationPlugin.HANDLER_KEY, 0L);
                 LocationResult result = LocationResult.extractResult(intent);
                 if (result != null) {
                     List<Location> locations = result.getLocations();
-                    LocationPlugin.handleNewBackgroundLocations(context, locations);
+                    HeadlessPlugin headLess = new HeadlessPlugin(context);
+                    headLess.handleNewBackgroundLocations(context, locations);
                     Log.i(TAG, locations.toString());
                 }
             }

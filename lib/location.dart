@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// A data class that contains various information about the user's location.
@@ -32,6 +33,27 @@ class LocationData {
     );
   }
 }
+
+void callbackDispatcher() {
+  const MethodChannel _backgroundChannel =
+      MethodChannel('lyokone/location');
+  WidgetsFlutterBinding.ensureInitialized();
+
+  _backgroundChannel.setMethodCallHandler((MethodCall call) async {
+    print("Received in Flutter, trying to dispatch");
+    final List<dynamic> args = call.arguments;
+    final Function handlerRawr = PluginUtilities.getCallbackFromHandle(
+        CallbackHandle.fromRawHandle(args[0]));
+    print("handlerRawr ${handlerRawr}");
+    assert(handlerRawr != null);
+    final List<LocationData> locationData = [];
+    for (var location in args[1]) {
+      locationData.add(LocationData.fromMap(location.cast<String, double>()));
+    }
+    handlerRawr(locationData);
+  });
+}
+
 
 /// https://developers.google.com/android/reference/com/google/android/gms/location/LocationRequest
 /// https://developer.apple.com/documentation/corelocation/cllocationaccuracy?language=objc
@@ -87,23 +109,12 @@ class Location {
     return _onLocationChanged;
   }
 
-  Future<bool> registerBackgroundLocation(void Function(List<LocationData> id) callback) {
-    // Handler of background task messages
-    _channel.setMethodCallHandler((MethodCall call) async {
-      final List<dynamic> args = call.arguments;
-      final Function callbackHandler = PluginUtilities.getCallbackFromHandle(
-          CallbackHandle.fromRawHandle(args[0]));
-      assert(callback != null);
-      final List<LocationData> locationData = [];
-      for (var location in args[1]) {
-        locationData.add(LocationData.fromMap(location.cast<String, double>()));
-      }
-      callbackHandler(locationData);
-    });
-
-    int rawHandle = PluginUtilities.getCallbackHandle(callback).toRawHandle();
+  Future<bool> registerBackgroundLocation(void Function(List<LocationData> id) callback) {    
+    int rawHandle = PluginUtilities.getCallbackHandle(callbackDispatcher).toRawHandle();
+    int rawCallback = PluginUtilities.getCallbackHandle(callback).toRawHandle();
     return _channel.invokeMethod('registerBackgroundLocation', {
         "rawHandle": rawHandle,
+        "rawCallback": rawCallback
       }).then((result) => result == 1);
   }
 
