@@ -214,7 +214,9 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
             requestService(result);
         } else if (call.method.equals("registerBackgroundLocation")) {
             registerBackgroundLocation((long) call.argument("rawHandle"), (long) call.argument("rawCallback"), result);
-        }else {
+        } else if (call.method.equals("removeBackgroundLocation")) {
+            removeBackgroundLocation(result);
+        } else {
             result.notImplemented();
         }
     }
@@ -530,6 +532,20 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, PluginR
             e.printStackTrace();
             result.success(0);
         }
+    }
+
+    private void removeBackgroundLocation(Result result) {
+        Log.i(TAG, "Removing location updates");
+        LocationRequestHelper.setRequesting(mContext, false);
+        SharedPreferences prefs = mContext.getSharedPreferences(this.TAG, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putLong(HANDLER_KEY, -1);
+        editor.putLong(CALLBACK_KEY, -1);
+
+        editor.apply();
+
+        mFusedLocationClient.removeLocationUpdates(getBackgroundPendingIntent());
+        result.success(1);
     }
 
     private PendingIntent getBackgroundPendingIntent() {

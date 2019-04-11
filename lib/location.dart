@@ -118,4 +118,8 @@ class Location {
       }).then((result) => result == 1);
   }
 
+  Future<bool> removeBackgroundLocation() {    
+    return _channel.invokeMethod('removeBackgroundLocation').then((result) => result == 1);
+  }
+
 }

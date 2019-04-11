@@ -104,6 +104,12 @@ class _MyAppState extends State<MyApp> {
 
   static void backgroundCallback(List<LocationData> locations) async {
     print('Location data received from background: $locations');
+    
+  }
+
+  stopRefresh() async {
+    _locationSubscription.cancel();
+    await _locationService.removeBackgroundLocation();
   }
 
   slowRefresh() async {
@@ -175,7 +181,7 @@ class _MyAppState extends State<MyApp> {
               children: widgets,
             ),
             floatingActionButton: new FloatingActionButton(
-              onPressed: () => _locationSubscription.cancel(),
+              onPressed: () => stopRefresh(),
               tooltip: 'Stop Track Location',
               child: Icon(Icons.stop),
             ),
