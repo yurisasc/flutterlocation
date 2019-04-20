@@ -19,15 +19,49 @@
 
 @implementation LocationPlugin {
     UIViewController *_viewController;
+    FlutterEngine *_headlessRunner;
+    FlutterMethodChannel *channel;
+    FlutterMethodChannel *backgroundChannel;
+    FlutterEventChannel *stream;
+    NSObject<FlutterPluginRegistrar> *_registrar;
 }
 
-+(void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
-    FlutterMethodChannel *channel = [FlutterMethodChannel methodChannelWithName:@"lyokone/location" binaryMessenger:registrar.messenger];
-    FlutterEventChannel *stream = [FlutterEventChannel eventChannelWithName:@"lyokone/locationstream" binaryMessenger:registrar.messenger];
+static LocationPlugin *instance = nil;
+static FlutterPluginRegistrantCallback registerPlugins = nil;
+static BOOL initialized = NO;
 
-    LocationPlugin *instance = [[LocationPlugin alloc] init];
-    [registrar addMethodCallDelegate:instance channel:channel];
-    [stream setStreamHandler:instance];
+#pragma mark FlutterPlugin Methods
+
+
++(void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
+    @synchronized(self) {
+    if (instance == nil) {
+      instance = [[LocationPlugin alloc] init:registrar];
+      [registrar addApplicationDelegate:instance];
+    }
+  }
+}
+
++ (void)setPluginRegistrantCallback:(FlutterPluginRegistrantCallback)callback {
+    registerPlugins = callback;
+}
+
+- (instancetype)init:(NSObject<FlutterPluginRegistrar> *)registrar {
+    self = [super init];
+    NSAssert(self, @"super init cannot be nil");
+
+    _headlessRunner = [[FlutterEngine alloc] initWithName:@"FlutterLocationIsolate" project:nil allowHeadlessExecution:YES];
+    _registrar = registrar;
+
+    channel = [FlutterMethodChannel methodChannelWithName:@"lyokone/location" binaryMessenger:registrar.messenger];
+    [registrar addMethodCallDelegate:self channel:channel];
+
+    stream = [FlutterEventChannel eventChannelWithName:@"lyokone/locationstream" binaryMessenger:registrar.messenger];  
+    [stream setStreamHandler:self];
+
+    backgroundChannel = [FlutterMethodChannel methodChannelWithName:@"lyokone/location_background" binaryMessenger:_headlessRunner];
+
+    return self;
 }
 
 -(instancetype)initWithViewController:(UIViewController *)viewController {
@@ -127,23 +161,62 @@
             [alert show];
             result(@(0));
         }
+    } else if([call.method isEqualToString:@"registerBackgroundLocation"]) {
+        @synchronized(self) {
+            initialized = YES;
+        }
+        
+        if ([CLLocationManager authorizationStatus] != kCLAuthorizationStatusAuthorizedAlways && [CLLocationManager locationServicesEnabled])
+        {
+            [self requestBackgroundPermission];
+        } 
+
+        
+        int64_t rawHandle = [call.arguments[@"rawHandle"] longLongValue];
+        int64_t rawCallback = [call.arguments[@"rawCallback"] longLongValue];
+        NSUserDefaults *preferences = [NSUserDefaults standardUserDefaults];
+        [preferences setObject:[NSNumber numberWithLongLong:rawHandle] forKey:@"rawHandle"];
+        [preferences setObject:[NSNumber numberWithLongLong:rawCallback] forKey:@"rawCallback"];
+        [preferences synchronize];
+        FlutterCallbackInformation *info = [FlutterCallbackCache lookupCallbackInformation:rawHandle];
+        NSAssert(info != nil, @"failed to find callback");
+        NSString *entrypoint = info.callbackName;
+        NSString *uri = info.callbackLibraryPath;
+        [_headlessRunner runWithEntrypoint:entrypoint libraryURI:uri];
+        NSAssert(registerPlugins != nil, @"failed to set registerPlugins");
+        registerPlugins(_headlessRunner);
+
+        result(@(1));
+        
+    } else if([call.method isEqualToString:@"removeBackgroundLocation"]) {
+        [self.clLocationManager stopMonitoringSignificantLocationChanges];
     } else {
         result(FlutterMethodNotImplemented);
     }
 }
 
 
+
 -(void) requestPermission {
     if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"] != nil) {
         [self.clLocationManager requestWhenInUseAuthorization];
     }
-    else if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysUsageDescription"] != nil) {
+    else {
+        [NSException raise:NSInternalInconsistencyException format:@"To use location in iOS8 and above you need to define either NSLocationWhenInUseUsageDescription or NSLocationAlwaysUsageDescription in the app bundle's Info.plist file"];
+    }
+}
+
+-(void) requestBackgroundPermission {
+    if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysAndWhenInUseUsageDescription"] != nil) {
+        NSLog(@"Request background location");
         [self.clLocationManager requestAlwaysAuthorization];
     }
     else {
         [NSException raise:NSInternalInconsistencyException format:@"To use location in iOS8 and above you need to define either NSLocationWhenInUseUsageDescription or NSLocationAlwaysUsageDescription in the app bundle's Info.plist file"];
     }
 }
+
+
 
 -(BOOL) isPermissionGranted {
     BOOL isPermissionGranted = NO;
@@ -214,6 +287,50 @@
     } else {
         [self.clLocationManager stopUpdatingLocation];
     }
+
+    // Background checks
+    NSUserDefaults *preferences = [NSUserDefaults standardUserDefaults];
+
+    // [preferences setObject:rawHandle forKey:@"rawHandle"];
+    // [preferences setObject:rawCallback forKey:@"rawCallback"];
+    // HighScore = [[[NSUserDefaults standardUserDefaults] objectForKey:@"HighScoreSaved"] longLongValue];
+
+    @synchronized(self) {
+        if (initialized) {
+            NSMutableArray *listData = [[NSMutableArray alloc] init];
+
+            for (CLLocation *location in locations) {
+                    NSTimeInterval timeInSeconds = [location.timestamp timeIntervalSince1970];
+                    NSDictionary<NSString*,NSNumber*>* coordinatesDict = @{
+                        @"latitude": @(location.coordinate.latitude),
+                        @"longitude": @(location.coordinate.longitude),
+                        @"accuracy": @(location.horizontalAccuracy),
+                        @"altitude": @(location.altitude),
+                        @"speed": @(location.speed),
+                        @"speed_accuracy": @(0.0),
+                        @"heading": @(location.course),
+                        @"time": @((double) timeInSeconds)
+                        };
+
+                    [listData addObject:coordinatesDict];
+
+            }
+
+            if ([preferences objectForKey:@"rawCallback"] != nil && backgroundChannel != nil)
+            {
+                NSLog(@"Trying to send background updates");
+                int64_t rawCallback = [[preferences objectForKey:@"rawCallback"] longLongValue];
+                [backgroundChannel
+                    invokeMethod:@""
+                        arguments:@[
+                        @(rawCallback), listData
+                        ]];
+
+            }
+        }
+    }
+    
+
 }
 
 - (void)locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status {
@@ -226,7 +343,7 @@
         }
         
     }
-    else if (status == kCLAuthorizationStatusAuthorizedWhenInUse || status == kCLAuthorizationStatusAuthorizedAlways) {
+    else if (status == kCLAuthorizationStatusAuthorizedWhenInUse) {
         NSLog(@"User granted permissions");
         if (self.permissionWanted) {
             self.permissionWanted = NO;
@@ -236,6 +353,9 @@
         if (self.locationWanted || self.flutterListening) {
             [self.clLocationManager startUpdatingLocation];
         }
+    } else if (status == kCLAuthorizationStatusAuthorizedAlways) {
+        NSLog(@"User granted background permissions");
+        [self.clLocationManager startMonitoringSignificantLocationChanges];
     }
 }
 

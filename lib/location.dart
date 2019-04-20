@@ -36,7 +36,7 @@ class LocationData {
 
 void callbackDispatcher() {
   const MethodChannel _backgroundChannel =
-      MethodChannel('lyokone/location');
+      MethodChannel('lyokone/location_background');
   WidgetsFlutterBinding.ensureInitialized();
 
   _backgroundChannel.setMethodCallHandler((MethodCall call) async {
@@ -44,7 +44,7 @@ void callbackDispatcher() {
     final List<dynamic> args = call.arguments;
     final Function handlerRawr = PluginUtilities.getCallbackFromHandle(
         CallbackHandle.fromRawHandle(args[0]));
-    print("handlerRawr ${handlerRawr}");
+    print("handlerRawr $handlerRawr");
     assert(handlerRawr != null);
     final List<LocationData> locationData = [];
     for (var location in args[1]) {

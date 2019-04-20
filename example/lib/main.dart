@@ -102,9 +102,8 @@ class _MyAppState extends State<MyApp> {
 
   }
 
-  static void backgroundCallback(List<LocationData> locations) async {
+  static void backgroundCallback(List<LocationData> locations) {
     print('Location data received from background: $locations');
-    
   }
 
   stopRefresh() async {
