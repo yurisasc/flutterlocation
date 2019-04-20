@@ -66,6 +66,7 @@ import io.flutter.view.FlutterRunArguments;
 public class HeadlessPlugin implements MethodCallHandler {
     private static final String STREAM_CHANNEL_NAME = "lyokone/locationstream";
     private static final String METHOD_CHANNEL_NAME = "lyokone/location";
+    private static final String METHOD_CHANNEL_NAME_BACKGROUND = "lyokone/location_background";
 
     private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 34;
     private static final int REQUEST_CHECK_SETTINGS = 0x1;
@@ -215,7 +216,7 @@ public class HeadlessPlugin implements MethodCallHandler {
         mFlutterNativeView = new FlutterNativeView(mContext.getApplicationContext(), true);
 
         // Create the Transmitter channel
-        mBackgroundChannel = new MethodChannel(mFlutterNativeView, METHOD_CHANNEL_NAME);
+        mBackgroundChannel = new MethodChannel(mFlutterNativeView, METHOD_CHANNEL_NAME_BACKGROUND);
         mBackgroundChannel.setMethodCallHandler(this);
 
         if (mPluginRegistrantCallback == null) {
