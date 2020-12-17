@@ -174,20 +174,26 @@ class FlutterLocation
                 } else {
                     result.success(0);
                 }
-                result = null;
-                return true;
+                clearResultObj();
+                break;
             case REQUEST_CHECK_SETTINGS:
                 if (resultCode == Activity.RESULT_OK) {
                     startRequestingLocation();
+                    clearResultObj();
                     return true;
                 }
 
                 result.error("SERVICE_STATUS_DISABLED", "Failed to get location. Location services disabled", null);
-                result = null;
-                return true;
+                clearResultObj();
+                return false;
             default:
+                clearResultObj();
                 return false;
         }
+    }
+
+    private void clearResultObj(){
+        result = null;
     }
 
     public void changeSettings(Integer locationAccuracy, Long updateIntervalMilliseconds,
